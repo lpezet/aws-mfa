@@ -86,4 +86,32 @@ aws --profile someprofile-mfa iam get-user
 The response (error or not) should display your current aws username (if your AWS user has been granted permission to query get-user from IAM service).
 
 
+## AWS CodeCommit
+
+If you're using AWS CodeCommit, you'll need to configure a few things to make it work with MFA (unless you bypass it in your policies).
+
+Create `~/.gitconfig` file with the following:
+
+```
+[user]
+ name = First Last
+ email = flast@somewhere.com
+[credential]
+ helper = !aws --profile someprofile-mfa --region us-east-1 codecommit credential-helper $@
+ UseHttpPath = true
+```
+
+Note the use of the `someprofile-mfa` above: you should specify the `-mfa` profile you'll be using when dealing with git.
+For Mac users, you may have problems with credentials being saved in KeyChain (defeating the one-time password aspect of MFA, and consequently failing further authentication).
+Edit the file `/Library//Developer/CommandLineTools/usr/share/git-core/gitconfig` (can also be `/Applications/Xcode.app/Contents/Developer/usr/share/git-core/gitconfig` if XCode installed), and comment out the helper as such:
+
+```
+[credential]
+        #helper = osxkeychain
+```
+
+This is the `global` level configuration, so you can still configure `helper = osxkeychain` at the project/local level for git if need be.
+
+
+
 
