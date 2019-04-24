@@ -1,0 +1,91 @@
+#!/bin/bash
+
+check_installation() {
+	if [ ! -x "/usr/local/bin/jq" -a ! -x "/usr/bin/jq" ]; then
+   		echo "jq must be installed first. Try 'brew install jq'."
+   		exit 1
+ 	fi
+ 	if [ ! -x "/usr/local/bin/aws" -a ! -x "/usr/bin/aws" ]; then
+   		echo "aws cli must be installed first. Try 'brew install awscli'."
+   		exit 1
+ 	fi
+}
+
+check_installation
+
+
+if [ -z "$1" ]; then
+ echo -e "Get your MFA ARN and save it by running:\naws-mfa [aws_profile] token"
+ exit 1
+fi
+
+if [ -z "$2" ]; then
+ token=$1
+else
+ token=$2
+ profile=$1
+fi
+
+if [ "$token" = "reset" ]; then
+ echo "unset AWS_PROFILE" > ~/.aws/__reset_temp_creds
+ echo "unset AWS_ACCESS_KEY_ID" >> ~/.aws/__reset_temp_creds
+ echo "unset AWS_SECRET_ACCESS_KEY" >> ~/.aws/__reset_temp_creds
+ echo "unset AWS_SESSION_TOKEN" >> ~/.aws/__reset_temp_creds
+ echo -e "Run the following to unset env variables:\nsource ~/.aws/__reset_temp_creds"
+ exit 0
+fi;
+
+get_mfa_device_id() {
+ sn=$(aws --profile=$profile configure get mfa_serial)
+ if [ -z "$sn" ]; then
+  # legacy
+  sn=$(aws --profile=$profile configure get aws_mfa_device_id)
+ fi
+}
+
+get_mfa_device_id
+
+if [ -z "$sn" ]; then
+ echo "Could not find MFA device for username $username for profile $profile."
+ exit 1
+fi
+opts=()
+if [ ! -z "$profile" ]; then
+ opts+=(--profile $profile)
+fi
+
+aws ${opts[@]} sts get-session-token --duration-seconds 129600 --serial-number $sn --token $token > ~/.aws/temp_creds.json
+
+if [ ! $? -eq 0 ]; then
+ echo "Error getting session token."
+ exit 1
+fi
+
+#jq '.' ~/.aws/temp_creds.json
+sk=$(jq --raw-output '.Credentials.SecretAccessKey' ~/.aws/temp_creds.json)
+ak=$(jq --raw-output '.Credentials.AccessKeyId' ~/.aws/temp_creds.json)
+st=$(jq --raw-output '.Credentials.SessionToken' ~/.aws/temp_creds.json)
+
+filename=~/.aws/_mfa_${profile}
+echo "" > $filename
+if [ ! -z "$profile" ]; then
+ echo "export AWS_PROFILE=$profile" >> $filename
+fi
+echo "export AWS_ACCESS_KEY_ID=$ak" >> $filename
+echo "export AWS_SECRET_ACCESS_KEY=$sk" >> $filename
+echo "export AWS_SESSION_TOKEN=$st" >> $filename
+
+echo -e "Done. Run the following to import env variables: source $filename"
+echo -e "Or use the following as a profile already installed in aws credentials/config: ${profile}-mfa"
+
+#echo "[${profile}-mfa]"
+#echo "aws_access_key_id = $ak"
+#echo "aws_secret_access_key = $sk"
+#echo "aws_session_token = $st"
+#echo -e "\nDone."
+
+aws configure --profile "${profile}-mfa" set aws_access_key_id $ak
+aws configure --profile "${profile}-mfa" set aws_secret_access_key $sk
+aws configure --profile "${profile}-mfa" set aws_session_token $st
+
+rm -f ~/.aws/temp_creds.json
